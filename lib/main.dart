@@ -1,12 +1,13 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const HealthTrackerApp());
 }
 
@@ -17,131 +18,214 @@ class HealthTrackerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Health Tracker',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.teal,
+        primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: const HealthHomeScreen(),
+      home: const HealthTrackerHomePage(),
     );
   }
 }
 
-class HealthEntry {
-  final DateTime dateTime;
-  final String bp;
-  final String sugar;
-  final String stomaOutput;
-  final String foodEaten;
-  final String mealTime;
+class HealthRecord {
+  final String date;
+  final String time;
+  final int systolic;
+  final int diastolic;
+  final int pulse;
 
-  HealthEntry({
-    required this.dateTime,
-    required this.bp,
-    required this.sugar,
-    required this.stomaOutput,
-    required this.foodEaten,
-    required this.mealTime,
+  HealthRecord({
+    required this.date,
+    required this.time,
+    required this.systolic,
+    required this.diastolic,
+    required this.pulse,
   });
+
+  Map<String, dynamic> toJson() => {
+        'date': date,
+        'time': time,
+        'systolic': systolic,
+        'diastolic': diastolic,
+        'pulse': pulse,
+      };
+
+  factory HealthRecord.fromJson(Map<String, dynamic> json) => HealthRecord(
+        date: json['date'],
+        time: json['time'],
+        systolic: json['systolic'],
+        diastolic: json['diastolic'],
+        pulse: json['pulse'],
+      );
 }
 
-class HealthHomeScreen extends StatefulWidget {
-  const HealthHomeScreen({super.key});
+class HealthTrackerHomePage extends StatefulWidget {
+  const HealthTrackerHomePage({super.key});
 
   @override
-  State<HealthHomeScreen> createState() => _HealthHomeScreenState();
+  State<HealthTrackerHomePage> createState() => _HealthTrackerHomePageState();
 }
 
-class _HealthHomeScreenState extends State<HealthHomeScreen> {
-  final List<HealthEntry> _entries = [];
-
-  final _bpController = TextEditingController();
-  final _sugarController = TextEditingController();
-  final _stomaController = TextEditingController();
-  final _foodController = TextEditingController();
-  final _mealTimeController = TextEditingController();
+class _HealthTrackerHomePageState extends State<HealthTrackerHomePage> {
+  final List<HealthRecord> _records = [];
+  final _systolicController = TextEditingController();
+  final _diastolicController = TextEditingController();
+  final _pulseController = TextEditingController();
 
   DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
 
-  void _addEntry() {
-    if (_bpController.text.isEmpty &&
-        _sugarController.text.isEmpty &&
-        _stomaController.text.isEmpty &&
-        _foodController.text.isEmpty) {
+  @override
+  void initState() {
+    super.initState();
+    _loadRecords();
+  }
+
+  Future<void> _loadRecords() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? recordsData = prefs.getString('saved_health_records');
+    if (recordsData != null) {
+      final List<dynamic> jsonList = jsonDecode(recordsData);
+      setState(() {
+        _records.clear();
+        _records.addAll(jsonList.map((item) => HealthRecord.fromJson(item)));
+        _sortRecords();
+      });
+    }
+  }
+
+  Future<void> _saveRecords() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String recordsData =
+        jsonEncode(_records.map((e) => e.toJson()).toList());
+    await prefs.setString('saved_health_records', recordsData);
+  }
+
+  void _sortRecords() {
+    _records.sort((a, b) {
+      DateTime dtA = DateFormat('yyyy-MM-dd hh:mm a')
+          .parse('${a.date} ${a.time}');
+      DateTime dtB = DateFormat('yyyy-MM-dd hh:mm a')
+          .parse('${b.date} ${b.time}');
+      return dtA.compareTo(dtB);
+    });
+  }
+
+  void _addRecord() {
+    if (_systolicController.text.isEmpty ||
+        _diastolicController.text.isEmpty ||
+        _pulseController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kam az kam ek field bharein!')),
+        const SnackBar(content: Text('Please enter all values')),
       );
       return;
     }
 
+    final formattedDate = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final now = DateTime.now();
+    final dt = DateTime(now.year, now.month, now.day, _selectedTime.hour, _selectedTime.minute);
+    final formattedTime = DateFormat('hh:mm a').format(dt);
+
     setState(() {
-      _entries.insert(
-        0,
-        HealthEntry(
-          dateTime: _selectedDate,
-          bp: _bpController.text,
-          sugar: _sugarController.text,
-          stomaOutput: _stomaController.text,
-          foodEaten: _foodController.text,
-          mealTime: _mealTimeController.text,
+      _records.add(
+        HealthRecord(
+          date: formattedDate,
+          time: formattedTime,
+          systolic: int.parse(_systolicController.text),
+          diastolic: int.parse(_diastolicController.text),
+          pulse: int.parse(_pulseController.text),
         ),
       );
+      _sortRecords();
     });
 
-    _bpController.clear();
-    _sugarController.clear();
-    _stomaController.clear();
-    _foodController.clear();
-    _mealTimeController.clear();
+    _saveRecords();
 
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Data save ho gaya!')),
-    );
+    _systolicController.clear();
+    _diastolicController.clear();
+    _pulseController.clear();
   }
 
-  Future<void> _exportToPDF() async {
-    if (_entries.isEmpty) {
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectTime(BuildContext context) async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (picked != null && picked != _selectedTime) {
+      setState(() {
+        _selectedTime = picked;
+      });
+    }
+  }
+
+  Future<void> _generatePdfWithDateRange() async {
+    if (_records.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PDF banane ke liye koi data nahi hai!')),
+        const SnackBar(content: Text('No records available to export')),
       );
+      return;
+    }
+
+    final DateTimeRange? dateRange = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: 'Select Date Range for PDF',
+    );
+
+    if (dateRange == null) return;
+
+    final filteredRecords = _records.where((record) {
+      DateTime recordDate = DateFormat('yyyy-MM-dd').parse(record.date);
+      DateTime start = DateTime(dateRange.start.year, dateRange.start.month, dateRange.start.day);
+      DateTime end = DateTime(dateRange.end.year, dateRange.end.month, dateRange.end.day, 23, 59, 59);
+      return recordDate.isAfter(start.subtract(const Duration(seconds: 1))) &&
+          recordDate.isBefore(end);
+    }).toList();
+
+    if (filteredRecords.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No records found in selected range')),
+        );
+      }
       return;
     }
 
     final pdf = pw.Document();
+    final startDateStr = DateFormat('dd-MM-yyyy').format(dateRange.start);
+    final endDateStr = DateFormat('dd-MM-yyyy').format(dateRange.end);
 
     pdf.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.a4,
         build: (pw.Context context) {
           return pw.Column(
-            cross: pw.CrossAxisAlignment.start,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Header(
-                level: 0,
-                child: pw.Text('Health Log Report',
-                    style: pw.TextStyle(
-                        fontSize: 24, fontWeight: pw.FontWeight.bold)),
-              ),
-              pw.SizedBox(height: 10),
+              pw.Text('Health Tracker Report',
+                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 8),
+              pw.Text('Date Range: $startDateStr to $endDateStr',
+                  style: const pw.TextStyle(fontSize: 14)),
+              pw.SizedBox(height: 16),
               pw.Table.fromTextArray(
-                headers: [
-                  'Date/Time',
-                  'BP (mmHg)',
-                  'Sugar (mg/dL)',
-                  'Stoma Output',
-                  'Diet / Food',
-                  'Meal Time'
-                ],
-                data: _entries.map((entry) {
-                  return [
-                    DateFormat('yyyy-MM-dd HH:mm').format(entry.dateTime),
-                    entry.bp,
-                    entry.sugar,
-                    entry.stomaOutput,
-                    entry.foodEaten,
-                    entry.mealTime,
-                  ];
-                }).toList(),
+                headers: ['Date', 'Time', 'Systolic', 'Diastolic', 'Pulse'],
+                data: filteredRecords.map((r) => [r.date, r.time, r.systolic, r.diastolic, r.pulse]).toList(),
               ),
             ],
           );
@@ -154,128 +238,91 @@ class _HealthHomeScreenState extends State<HealthHomeScreen> {
     );
   }
 
-  void _showAddDialog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          top: 16,
-          left: 16,
-          right: 16,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Nayi Entry Shamil Karein',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _bpController,
-                decoration: const InputDecoration(
-                    labelText: 'Blood Pressure (e.g. 120/80)'),
-              ),
-              TextField(
-                controller: _sugarController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Sugar Level (e.g. 110)'),
-              ),
-              TextField(
-                controller: _stomaController,
-                decoration: const InputDecoration(
-                    labelText: 'Stoma Output (Quantity / Note)'),
-              ),
-              TextField(
-                controller: _foodController,
-                decoration:
-                    const InputDecoration(labelText: 'Kya Khaya (Diet)'),
-              ),
-              TextField(
-                controller: _mealTimeController,
-                decoration: const InputDecoration(
-                    labelText: 'Khane Ka Time (e.g. 2:30 PM)'),
-              ),
-              const SizedBox(height: 15),
-              ElevatedButton(
-                onPressed: _addEntry,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Save Karein'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Health & Stoma Tracker'),
-        backgroundColor: Colors.teal,
-        foregroundColor: Colors.white,
+        title: const Text('Health Tracker'),
         actions: [
           IconButton(
             icon: const Icon(Icons.picture_as_pdf),
-            onPressed: _exportToPDF,
-            tooltip: 'PDF Export Karein',
+            onPressed: _generatePdfWithDateRange,
           ),
         ],
       ),
-      body: _entries.isEmpty
-          ? const Center(
-              child: Text(
-                'Abhi tak koi data entry nahi hui.\nNeeche "+" button par click kar ke add karein.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-            )
-          : ListView.builder(
-              itemCount: _entries.length,
-              itemBuilder: (ctx, index) {
-                final item = _entries[index];
-                return Card(
-                  margin:
-                      const EdgeInsets.horizontal(10, vertical: 6),
-                  child: ListTile(
-                    title: Text(
-                      DateFormat('EEE, dd MMM yyyy - hh:mm a')
-                          .format(item.dateTime),
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, color: Colors.teal),
-                    ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Column(
-                        cross: CrossAxisAlignment.start,
-                        children: [
-                          if (item.bp.isNotEmpty) Text('• BP: ${item.bp}'),
-                          if (item.sugar.isNotEmpty)
-                            Text('• Sugar: ${item.sugar} mg/dL'),
-                          if (item.stomaOutput.isNotEmpty)
-                            Text('• Stoma Output: ${item.stomaOutput}'),
-                          if (item.foodEaten.isNotEmpty)
-                            Text('• Diet: ${item.foodEaten} (${item.mealTime})'),
-                        ],
-                      ),
-                    ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _systolicController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Systolic'),
                   ),
-                );
-              },
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _diastolicController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Diastolic'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _pulseController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Pulse'),
+                  ),
+                ),
+              ],
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddDialog,
-        backgroundColor: Colors.teal,
-        child: const Icon(Icons.add, color: Colors.white),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.calendar_today),
+                  label: Text(DateFormat('yyyy-MM-dd').format(_selectedDate)),
+                  onPressed: () => _selectDate(context),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.access_time),
+                  label: Text(_selectedTime.format(context)),
+                  onPressed: () => _selectTime(context),
+                ),
+                ElevatedButton(
+                  onPressed: _addRecord,
+                  child: const Text('Add Record'),
+                ),
+              ],
+            ),
+            const Divider(height: 32),
+            Expanded(
+              child: _records.isEmpty
+                  ? const Center(child: Text('No records saved yet'))
+                  : ListView.builder(
+                      itemCount: _records.length,
+                      itemBuilder: (context, index) {
+                        final record = _records[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: ListTile(
+                            title: Text(
+                                'BP: ${record.systolic}/${record.diastolic} mmHg'),
+                            subtitle: Text(
+                                'Pulse: ${record.pulse} bpm | Date: ${record.date} | Time: ${record.time}'),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

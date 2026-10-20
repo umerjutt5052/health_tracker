@@ -29,14 +29,14 @@ class HealthTrackerApp extends StatelessWidget {
 }
 
 class HealthRecord {
-  final String date;
-  final String time;
-  final int systolic;
-  final int diastolic;
-  final int pulse;
-  final double sugar;
-  final String stomaOutput;
-  final String dietNotes;
+  String date;
+  String time;
+  int systolic;
+  int diastolic;
+  int pulse;
+  double sugar;
+  String stomaOutput;
+  String dietNotes;
 
   HealthRecord({
     required this.date,
@@ -164,6 +164,91 @@ class _HealthTrackerHomePageState extends State<HealthTrackerHomePage> {
     _sugarController.clear();
     _stomaController.clear();
     _dietController.clear();
+  }
+
+  void _deleteRecord(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Record?'),
+        content: const Text('Kya aap is record ko delete karna chahte hain?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () {
+              setState(() {
+                _records.removeAt(index);
+              });
+              _saveRecords();
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _editRecord(int index) {
+    final record = _records[index];
+    final editSystolic = TextEditingController(text: record.systolic > 0 ? record.systolic.toString() : '');
+    final editDiastolic = TextEditingController(text: record.diastolic > 0 ? record.diastolic.toString() : '');
+    final editPulse = TextEditingController(text: record.pulse > 0 ? record.pulse.toString() : '');
+    final editSugar = TextEditingController(text: record.sugar > 0 ? record.sugar.toString() : '');
+    final editStoma = TextEditingController(text: record.stomaOutput);
+    final editDiet = TextEditingController(text: record.dietNotes);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Record'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: TextField(controller: editSystolic, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Systolic'))),
+                  const SizedBox(width: 6),
+                  Expanded(child: TextField(controller: editDiastolic, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Diastolic'))),
+                  const SizedBox(width: 6),
+                  Expanded(child: TextField(controller: editPulse, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Pulse'))),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(controller: editSugar, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Sugar (mg/dL)')),
+              const SizedBox(height: 8),
+              TextField(controller: editStoma, decoration: const InputDecoration(labelText: 'Stoma Output')),
+              const SizedBox(height: 8),
+              TextField(controller: editDiet, decoration: const InputDecoration(labelText: 'Diet / Food Details')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+            onPressed: () {
+              setState(() {
+                record.systolic = int.tryParse(editSystolic.text) ?? 0;
+                record.diastolic = int.tryParse(editDiastolic.text) ?? 0;
+                record.pulse = int.tryParse(editPulse.text) ?? 0;
+                record.sugar = double.tryParse(editSugar.text) ?? 0.0;
+                record.stomaOutput = editStoma.text;
+                record.dietNotes = editDiet.text;
+              });
+              _saveRecords();
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Save Changes'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -422,6 +507,19 @@ class _HealthTrackerHomePageState extends State<HealthTrackerHomePage> {
                               '• Diet/Khana: ${record.dietNotes.isNotEmpty ? record.dietNotes : "N/A"}',
                               style: const TextStyle(height: 1.3),
                             ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
+                                onPressed: () => _editRecord(index),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                                onPressed: () => _deleteRecord(index),
+                              ),
+                            ],
                           ),
                         ),
                       );
